@@ -1,0 +1,54 @@
+name: Build and Inject Shop System
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # Allows you to run this manually
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Tweak Environment
+        run: |
+          brew install ldid
+          # Install Azule for IPA injection
+          git clone https://github.com/Al4ise/Azule ~/Azule
+          sudo ln -s ~/Azule/azule /usr/local/bin/azule
+
+      - name: Compile Shop System (Objective-C++)
+        run: |
+          # Use xcrun to find the path to the iPhone SDK
+          SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
+          
+          # Compile the .mm file into a dynamic library (.dylib)
+          xcrun -sdk iphoneos clang++ -dynamiclib -arch arm64 \
+          -isysroot "$SDK_PATH" \
+          -framework Foundation -framework UIKit -framework Security -framework QuartzCore \
+          -O3 \
+          shopsystem.mm -o shopsystem.dylib
+          
+          # Strip symbols to make it harder to reverse engineer
+          strip -x shopsystem.dylib
+          
+          # Sign the dylib with entitlements so it can run on iOS
+          ldid -S shopsystem.dylib
+
+      - name: Inject Tweak into Roblox IPA
+        run: |
+          # This assumes your decrypted file is named 'roblox.ipa' in the root folder
+          # -i: Input IPA
+          # -o: Output directory
+          # -f: Files to inject (your dylib)
+          # -n: New name for the IPA
+          azule -i roblox.ipa -o ./dist -f shopsystem.dylib -n "Roblox_Modded"
+
+      - name: Upload Modded IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Roblox-Shop-Injected
+          path: dist/*.ipa
